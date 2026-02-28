@@ -549,6 +549,7 @@ const FullscreenViewer=({seed,initPi=0,onClose,onDetail,currentUser})=>{
   const [fvShare,setFvShare]=useState(null);
   const [isMuted,setIsMuted]=useState(true);
   const [vidLoading,setVidLoading]=useState(false);
+  const [isPlaying,setIsPlaying]=useState(false);
   const vidRef=useRef(null);
   const [showComments,setShowComments]=useState(false);
   const [comments,setComments]=useState(seed.comments||[]);
@@ -567,8 +568,10 @@ const FullscreenViewer=({seed,initPi=0,onClose,onDetail,currentUser})=>{
     setKmKey(k=>k+1);
     pv.current=0;
     setProg(0);
-    setVidLoading(false);
-    // 슬라이드 바뀌면 새 비디오 ref 초기화 대기
+    const isVid2=parts[pi]&&(parts[pi].isVideo||isVideoUrl(parts[pi].photo));
+    setVidLoading(!!isVid2);
+    setIsPlaying(false);
+    if(vidRef.current){vidRef.current.pause();}
     vidRef.current=null;
   },[pi]);
   useEffect(()=>{
@@ -579,33 +582,45 @@ const FullscreenViewer=({seed,initPi=0,onClose,onDetail,currentUser})=>{
   },[pi,paused,parts.length]);
   const sendComment=()=>{if(!commentText.trim())return;setComments(p=>[{id:'c'+Date.now(),user:currentUser?.name||'me',text:commentText.trim(),avatar:currentUser?.avatar||'https://i.pravatar.cc/40?img=50',time:'방금'},...p]);setCommentText('');};
   const onTs=e=>{if(showComments){return;}touchRef.current={x:e.touches[0].clientX,y:e.touches[0].clientY};setPaused(true);};
-  const onTe=e=>{if(!touchRef.current)return;const dx=e.changedTouches[0].clientX-touchRef.current.x;const dy=e.changedTouches[0].clientY-touchRef.current.y;if(Math.abs(dy)>100&&Math.abs(dy)>Math.abs(dx)*1.5){onClose();return;}if(Math.abs(dx)>40){dx<0&&pi<parts.length-1?setPi(i=>i+1):dx>0&&pi>0&&setPi(i=>i-1);}setPaused(false);touchRef.current=null;};
+  const onTe=e=>{
+    if(!touchRef.current)return;
+    const dx=e.changedTouches[0].clientX-touchRef.current.x;
+    const dy=e.changedTouches[0].clientY-touchRef.current.y;
+    if(Math.abs(dy)>100&&Math.abs(dy)>Math.abs(dx)*1.5){onClose();touchRef.current=null;return;}
+    if(Math.abs(dx)>40){
+      dx<0&&pi<parts.length-1?setPi(i=>i+1):dx>0&&pi>0&&setPi(i=>i-1);
+    } else if(Math.abs(dx)<10&&Math.abs(dy)<10){
+      const v=vidRef.current;
+      if(v){
+        if(v.paused){v.play().then(()=>setIsPlaying(true)).catch(()=>{});}
+        else{v.pause();setIsPlaying(false);}
+      }
+    }
+    setPaused(false);
+    touchRef.current=null;
+  };
   return(
     <div style={{position:'absolute',inset:0,zIndex:90,background:'#000'}} className="af" onTouchStart={onTs} onTouchEnd={onTe}
-      onClick={()=>{
-          const v=vidRef.current;
-          if(!v)return;
-          if(v.muted){v.muted=false;v.play().catch(()=>{v.muted=true;});setIsMuted(false);}
-          else{v.muted=true;setIsMuted(true);}
-        }}>
+>
       <WorldMap tx={mapTx}/>
       {(cur.isVideo||isVideoUrl(cur.photo))?
-        <video key={`fs-v-${pi}`} src={cur.photo} playsInline autoPlay loop
+        <video key={`fs-v-${pi}`} src={cur.photo} playsInline loop
           onLoadStart={()=>setVidLoading(true)}
-          onCanPlay={e=>{setVidLoading(false);}}
-          ref={el=>{
-            if(el){
-              vidRef.current=el;
-              el.muted=true; // 항상 muted로 시작 (자동재생 정책)
-              el.play().catch(()=>{});
-            }
-          }}
+          onCanPlay={()=>setVidLoading(false)}
+          ref={el=>{if(el){vidRef.current=el;}}}
           style={{position:'absolute',inset:0,width:'100%',height:'100%',objectFit:'cover'}}/>
         :<img key={`fs-${pi}`} src={cur.photo} style={{position:'absolute',inset:0,width:'100%',height:'100%',objectFit:'cover'}} alt="" className="af"/>}
       <div style={{position:'absolute',inset:0,background:'linear-gradient(to bottom,rgba(8,0,15,.7)0%,transparent 28%,transparent 52%,rgba(8,0,15,.95)100%)'}}/>
       {vidLoading&&(cur.isVideo||isVideoUrl(cur.photo))&&(
         <div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center',zIndex:4,pointerEvents:'none'}}>
           <div style={{width:36,height:36,borderRadius:99,border:'3px solid rgba(168,85,247,.25)',borderTopColor:'#a855f7',animation:'spin 1s linear infinite'}}/>
+        </div>
+      )}
+      {!vidLoading&&!isPlaying&&(cur.isVideo||isVideoUrl(cur.photo))&&(
+        <div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center',zIndex:4,pointerEvents:'none'}}>
+          <div style={{width:64,height:64,borderRadius:99,background:'rgba(0,0,0,.5)',display:'flex',alignItems:'center',justifyContent:'center'}}>
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="white"><polygon points="5,3 19,12 5,21"/></svg>
+          </div>
         </div>
       )}
 
@@ -694,7 +709,6 @@ const FullscreenViewer=({seed,initPi=0,onClose,onDetail,currentUser})=>{
         </div>
       )}
       {userProfile&&<UserProfile targetUser={userProfile} currentUser={currentUser} seeds={seed.participants?[seed]:undefined} onClose={()=>setUserProfile(null)} onAsk={u=>setAskTarget(u)}/>}
-      {askTarget&&<AskModal creator={askTarget} onClose={()=>setAskTarget(null)} onSend={()=>setAskTarget(null)}/>}
     {fvShare&&<ShareSheet seed={fvShare} onClose={()=>setFvShare(null)}/>}
     </div>
   );
@@ -796,7 +810,7 @@ const HomeFeed=({seeds,onDetail,onNotif,unread,onJoin,currentUser,onAsk})=>{
 };
 
 /* ═══ SEED DETAIL ═══ */
-const SeedDetail=({seed,onBack,onDelete,currentUser})=>{
+const SeedDetail=({seed,onBack,onDelete,currentUser,onAsk})=>{
   const {t}=useT();
   const [pi,setPi]=useState(0);
   const [kmKey,setKmKey]=useState(0);
@@ -807,8 +821,8 @@ const SeedDetail=({seed,onBack,onDelete,currentUser})=>{
   const [sdShare,setSdShare]=useState(false);
   const [isMuted,setIsMuted]=useState(true);
   const [vidLoading,setVidLoading]=useState(false);
+  const [isPlaying,setIsPlaying]=useState(false);
   const [userProfile,setUserProfile]=useState(null);
-  const [askTarget,setAskTarget]=useState(null);
   const vidRef=useRef(null);
   const touchRef=useRef(null);
   const mapTx=useRef(0);
@@ -842,11 +856,11 @@ const SeedDetail=({seed,onBack,onDelete,currentUser})=>{
     if(Math.abs(dx)>40){
       dx<0?setPi(i=>Math.min(i+1,parts.length-1)):setPi(i=>Math.max(i-1,0));
     } else if(Math.abs(dx)<10&&Math.abs(dy)<10&&isVid){
-      // 탭 - 소리 토글
+      // 탭 - 재생/일시정지
       const v=vidRef.current;
       if(v){
-        if(v.muted){v.muted=false;v.play().catch(()=>{v.muted=true;});setIsMuted(false);}
-        else{v.muted=true;setIsMuted(true);}
+        if(v.paused){v.play().then(()=>setIsPlaying(true)).catch(()=>{});}
+        else{v.pause();setIsPlaying(false);}
       }
     }
     touchRef.current=null;
@@ -875,18 +889,19 @@ const SeedDetail=({seed,onBack,onDelete,currentUser})=>{
               <div style={{width:36,height:36,borderRadius:99,border:'3px solid rgba(168,85,247,.25)',borderTopColor:'#a855f7',animation:'spin 1s linear infinite'}}/>
             </div>
           )}
+          {!vidLoading&&!isPlaying&&isVid&&(
+            <div style={{position:'absolute',inset:0,display:'flex',alignItems:'center',justifyContent:'center',zIndex:6,pointerEvents:'none'}}>
+              <div style={{width:64,height:64,borderRadius:99,background:'rgba(0,0,0,.5)',display:'flex',alignItems:'center',justifyContent:'center'}}>
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="white"><polygon points="5,3 19,12 5,21"/></svg>
+              </div>
+            </div>
+          )}
 
           {isVid
-            ?<video key={`sd-v-${pi}`} src={cur.photo} playsInline autoPlay loop
+            ?<video key={`sd-v-${pi}`} src={cur.photo} playsInline loop
                 onLoadStart={()=>setVidLoading(true)}
                 onCanPlay={()=>setVidLoading(false)}
-                ref={el=>{
-                  if(el){
-                    vidRef.current=el;
-                    el.muted=true;
-                    el.play().catch(()=>{});
-                  }
-                }}
+                ref={el=>{if(el){vidRef.current=el;}}}
                 style={{width:'100%',height:'100%',objectFit:'cover',opacity:.88,display:'block'}}/>
             :<img key={pi} src={cur.photo} style={{width:'100%',height:'100%',objectFit:'cover',opacity:.72,display:'block'}} alt="" className="af"/>
           }
@@ -992,7 +1007,7 @@ const SeedDetail=({seed,onBack,onDelete,currentUser})=>{
         </>)}
       </div>
 
-      {userProfile&&<UserProfile targetUser={userProfile} currentUser={currentUser} seeds={[seed]} onClose={()=>setUserProfile(null)} onAsk={u=>setAskTarget(u)} onOpen={()=>{}}/>}
+      {userProfile&&<UserProfile targetUser={userProfile} currentUser={currentUser} seeds={[seed]} onClose={()=>setUserProfile(null)} onAsk={onAsk} onOpen={()=>{}}/>}
       {askTarget&&<AskModal creator={askTarget} onClose={()=>setAskTarget(null)} onSend={()=>setAskTarget(null)}/>}
       {sdShare&&<ShareSheet seed={seed} onClose={()=>setSdShare(false)}/>}
     </div>
@@ -1001,150 +1016,7 @@ const SeedDetail=({seed,onBack,onDelete,currentUser})=>{
 
 
 /* ═══ PROFILE ═══ */
-const Profile=({user,seeds,onLogout,onOpen,onDelete,onUpdateUser})=>{
-  const {t}=useT();
-  const [editing,setEditing]=useState(false);
-  const [name,setName]=useState(user.name);
-  const [bio,setBio]=useState(user.bio||'');
-  const [link,setLink]=useState(user.link||'');
-  const [avatar,setAvatar]=useState(user.avatar);
-  const avatarRef=useRef(null);
-  const onAvatarFile=async e=>{
-    const f=e.target.files[0];
-    if(!f||!f.type.startsWith('image/'))return;
-    // Canvas로 이미지 압축 (200x200, 품질 0.7 → ~15KB 이하)
-    const compress=(file)=>new Promise(res=>{
-      const img=new Image();
-      const url=URL.createObjectURL(file);
-      img.onload=()=>{
-        const canvas=document.createElement('canvas');
-        const size=200;
-        canvas.width=size; canvas.height=size;
-        const ctx=canvas.getContext('2d');
-        // 정사각형 크롭
-        const min=Math.min(img.width,img.height);
-        const sx=(img.width-min)/2; const sy=(img.height-min)/2;
-        ctx.drawImage(img,sx,sy,min,min,0,0,size,size);
-        URL.revokeObjectURL(url);
-        res(canvas.toDataURL('image/jpeg',0.7));
-      };
-      img.src=url;
-    });
-    try{
-      const base64=await compress(f);
-      setAvatar(base64); // 즉시 미리보기
-      if(window.FB&&user.uid){
-        await window.FB.updateDoc(window.FB.doc(window.FB.db,'users',user.uid),{avatar:base64});
-        if(typeof onUpdateUser==='function') onUpdateUser({...user,avatar:base64});
-      }
-    }catch(err){
-      console.log('avatar error:',err);
-    }
-  };
-  const [bubbles,setBubbles]=useState(INIT_BUBBLES.filter(b=>b.creatorHandle===user.handle));
-  const [inboxOpen,setInboxOpen]=useState(false);
-  const [replyModal,setReplyModal]=useState(null);
-  const [askModal,setAskModal]=useState(false);
-  const mine=seeds.filter(s=>s.uid===user.id);
-  const joined=seeds.filter(s=>s.uid!==user.id&&s.participants.some(p=>p.uid===user.id||p.handle===user.handle));
-  const handleReply=(bid,type,text)=>{
-    setBubbles(prev=>prev.map(b=>{if(b.id!==bid)return b;if(type==='public')return{...b,publicAnswer:{id:'pa'+Date.now(),type:'public',text,createdAt:Date.now()}};return{...b,answers:[...b.answers,{id:'a'+Date.now(),type:'private',to:user.id,text,createdAt:Date.now()}]};}));
-    setReplyModal(null);
-  };
-  const handleAsk=(text)=>{
-    setBubbles(p=>[{id:'b'+Date.now(),creatorHandle:user.handle,creator:{name:user.name,handle:user.handle,avatar:user.avatar},createdAt:Date.now(),expiresAt:Date.now()+86400000,question:text,askerName:'익명',askerCountry:'',answers:[],publicAnswer:null},...p]);
-    setAskModal(false);
-  };
-  return(
-    <div style={{flex:1,display:'flex',flexDirection:'column',overflow:'hidden',position:'relative'}}>
-      <div className="sc" style={{flex:1}}>
-        {/* 헤더 */}
-        <div style={{padding:'16px 18px 0',background:'linear-gradient(180deg,rgba(124,58,237,.09)0%,transparent 100%)'}}>
-          <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:16}}>
-            <div style={{fontSize:10,color:'var(--p)',letterSpacing:'.08em'}}>PROFILE</div>
-            <button onClick={()=>setEditing(!editing)} className="btn" style={{fontSize:11,color:'var(--p)'}}>{editing?t.done:t.edit}</button>
-          </div>
-          <div style={{display:'flex',gap:14,alignItems:'center',marginBottom:12}}>
-            <div style={{position:'relative',width:52,height:52,borderRadius:99,flexShrink:0,cursor:editing?'pointer':'default'}} onClick={()=>editing&&avatarRef.current?.click()}>
-              <div style={{position:'absolute',inset:-2,borderRadius:99,background:'linear-gradient(135deg,#7c3aed,#ec4899)'}}/>
-              <img src={avatar} style={{position:'relative',width:52,height:52,borderRadius:99,objectFit:'cover',border:'2.5px solid #08000f'}} alt=""/>
-              {editing&&<div style={{position:'absolute',inset:0,borderRadius:99,background:'rgba(0,0,0,.45)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:16}}>📷</div>}
-              <input ref={avatarRef} type="file" accept="image/*" style={{display:'none'}} onChange={onAvatarFile}/>
-            </div>
-            <div style={{flex:1}}>
-              {editing?<input className="inp" value={name} onChange={e=>setName(e.target.value)} style={{fontSize:13,fontWeight:700}}/>
-                :<div style={{fontSize:14,fontWeight:700,marginBottom:2}}>{name}</div>}
-              <div style={{fontSize:10,color:'var(--dim)'}}>{user.handle}</div>
-            </div>
-          </div>
-          {editing?(<>
-            <textarea className="inp" style={{height:44,marginBottom:4}} value={bio} onChange={e=>setBio(e.target.value)} placeholder="Bio…"/>
-            <input className="inp" style={{marginBottom:10,fontSize:11}} value={link} onChange={e=>setLink(e.target.value)} placeholder="🔗 링크 (https://…)"/>
-          </>):(
-            <div style={{marginBottom:10}}>
-              {bio&&<p style={{fontSize:11,color:'var(--dim)',lineHeight:1.5,marginBottom:link?4:0}}>{bio}</p>}
-              {link&&<a href={link.startsWith('http')?link:'https://'+link} target="_blank" rel="noopener noreferrer"
-                style={{fontSize:11,color:'#a855f7',wordBreak:'break-all',display:'flex',alignItems:'center',gap:4}}>
-                🔗 <span style={{textDecoration:'underline',textUnderlineOffset:2}}>{link.replace(/^https?:\/\//,'')}</span>
-              </a>}
-            </div>
-          )}
-          <div style={{display:'flex',gap:22,marginBottom:18}}>
-            {[[t.statRelay,mine.length],[t.statFollower,(user.followers||0)>=1000?((user.followers||0)/1000).toFixed(1)+'K':(user.followers||0)],['km',(user.totalKm||0)>=1000?((user.totalKm||0)/1000).toFixed(1)+'K':(user.totalKm||0)]].map(([l,v])=>(
-              <div key={l}><div style={{fontSize:14,fontWeight:700}}>{v}</div><div style={{fontSize:9,color:'var(--dim)'}}>{l}</div></div>
-            ))}
-          </div>
-        </div>
-
-        {/* 버블 섹션 */}
-        <div style={{padding:'14px 18px 16px',borderBottom:'1px solid rgba(168,85,247,.1)'}}>
-          <BubbleSection
-            bubbles={bubbles}
-            user={user}
-            onAsk={()=>setAskModal(true)}
-            onOpenInbox={()=>setInboxOpen(true)}
-            onReply={(b,type)=>setReplyModal({bubble:b,type})}
-          />
-        </div>
-
-        {/* 릴레이 목록 */}
-        <div style={{padding:'14px 18px 80px'}}>
-          <div style={{fontSize:9,color:'var(--dim)',letterSpacing:'.07em',marginBottom:12}}>MY RELAY</div>
-          {mine.length===0?<div style={{fontSize:11,color:'var(--dim)',textAlign:'center',padding:'20px 0'}}>{t.noRelay}</div>
-            :mine.map(s=>(
-              <div key={s.id} style={{display:'flex',gap:11,alignItems:'center',padding:'10px 0',borderBottom:'1px solid rgba(168,85,247,.06)'}}>
-                <img src={s.thumb} onClick={()=>onOpen&&onOpen(s)} style={{width:38,height:38,borderRadius:7,objectFit:'cover',opacity:.8,cursor:'pointer',flexShrink:0}} alt=""/>
-                <div style={{flex:1,minWidth:0,cursor:'pointer'}} onClick={()=>onOpen&&onOpen(s)}>
-                  <div style={{fontSize:12,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',marginBottom:1}}>{s.title}</div>
-                  <div style={{fontSize:10,color:'var(--dim)'}}>{s.participants.length}명 · {(s.totalKm/1000).toFixed(1)}K km</div>
-                </div>
-                {onDelete&&<button onClick={e=>{e.stopPropagation();if(confirm('삭제하시겠어요?'))onDelete(s.id);}} className="btn" style={{fontSize:16,color:'rgba(255,255,255,.22)',padding:'4px 8px',flexShrink:0,lineHeight:1}}>×</button>}
-              </div>
-            ))}
-          {joined.length>0&&<>
-            <div style={{fontSize:9,color:'var(--dim)',letterSpacing:'.07em',marginTop:20,marginBottom:12}}>JOINED RELAY</div>
-            {joined.map(s=>(
-              <div key={s.id} onClick={()=>onOpen&&onOpen(s)} style={{display:'flex',gap:11,alignItems:'center',padding:'10px 0',borderBottom:'1px solid rgba(168,85,247,.06)',cursor:'pointer'}}>
-                <img src={s.thumb} style={{width:38,height:38,borderRadius:7,objectFit:'cover',opacity:.55,flexShrink:0}} alt=""/>
-                <div style={{flex:1,minWidth:0}}>
-                  <div style={{fontSize:12,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',marginBottom:1}}>{s.title}</div>
-                  <div style={{fontSize:10,color:'var(--dim)'}}>{s.name} · {s.participants.length}명</div>
-                </div>
-              </div>
-            ))}
-          </>}
-          <button onClick={onLogout} className="btn" style={{fontSize:10,color:'rgba(255,255,255,.18)',marginTop:22,width:'100%',justifyContent:'flex-start'}}>{t.logout}</button>
-        </div>
-      </div>
-      {inboxOpen&&<InboxModal bubbles={bubbles} user={user} onClose={()=>setInboxOpen(false)} onReply={(b,type)=>{setReplyModal({bubble:b,type});setInboxOpen(false);}}/>}
-      {replyModal&&<ReplyModal bubble={replyModal.bubble} replyType={replyModal.type} onClose={()=>setReplyModal(null)} onSend={handleReply}/>}
-      {askModal&&<AskModal creator={user} onClose={()=>setAskModal(false)} onSend={handleAsk}/>}
-    </div>
-  );
-};
-
-/* ═══ EXPLORE ═══ */
-const Explore=({seeds,onOpen,onJoin,currentUser})=>{
+const Explore=({seeds,onOpen,onJoin,currentUser,onAsk})=>{
   const {t}=useT();
   const [q,setQ]=useState('');
   const [fs,setFs]=useState(null);
@@ -1179,7 +1051,7 @@ const Explore=({seeds,onOpen,onJoin,currentUser})=>{
 };
 
 /* ═══ LEGACY ═══ */
-const Legacy=({user,seeds,onOpen})=>{
+const Legacy=({user,seeds,onOpen,onAsk})=>{
   const {t}=useT();
   const [legProfile,setLegProfile]=useState(null);
   const mine=seeds.filter(s=>s.uid===user.id);
@@ -1217,12 +1089,238 @@ const Legacy=({user,seeds,onOpen})=>{
           ))}
         </>}
       </div>
-    {legProfile&&<UserProfile targetUser={legProfile} currentUser={user} seeds={seeds} onClose={()=>setLegProfile(null)} onAsk={(u)=>{setLegProfile(null);}} onOpen={onOpen}/>}
+    {legProfile&&<UserProfile targetUser={legProfile} currentUser={user} seeds={seeds} onClose={()=>setLegProfile(null)} onAsk={onAsk} onAsk={()=>{}} onOpen={onOpen}/>}
     </div>
   );
 };
 
 /* ═══ UPLOAD ═══ */
+const Profile=({user,seeds,onLogout,onOpen,onDelete,onUpdateUser})=>{
+  const {t}=useT();
+  const [editing,setEditing]=useState(false);
+  const [name,setName]=useState(user.name);
+  const [bio,setBio]=useState(user.bio||'');
+  const [link,setLink]=useState(user.link||'');
+  const [avatar,setAvatar]=useState(user.avatar);
+  const [bubbles,setBubbles]=useState([]);
+  const [inboxOpen,setInboxOpen]=useState(false);
+  const [replyModal,setReplyModal]=useState(null);
+  const [askModal,setAskModal]=useState(null);
+  const avatarRef=useRef(null);
+
+  // Firebase에서 내 버블(받은 질문) 실시간 로드
+  useEffect(()=>{
+    if(!window.FB||!user.handle)return;
+    const q=window.FB.query(
+      window.FB.collection(window.FB.db,'bubbles'),
+      window.FB.orderBy('createdAt','desc')
+    );
+    const unsub=window.FB.onSnapshot(q,snap=>{
+      const all=snap.docs.map(d=>({...d.data(),id:d.id}));
+      // 내 handle로 온 버블만
+      setBubbles(all.filter(b=>b.creatorHandle===user.handle));
+    });
+    return()=>unsub();
+  },[user.handle]);
+
+  const mine=seeds.filter(s=>s.uid===user.id||s.uid===user.uid);
+  const joined=seeds.filter(s=>s.uid!==user.id&&s.uid!==user.uid&&s.participants&&s.participants.some(p=>p.name===user.name));
+
+  const onAvatarFile=async e=>{
+    const f=e.target.files[0];
+    if(!f||!f.type.startsWith('image/'))return;
+    const compress=(file)=>new Promise(res=>{
+      const img=new Image();
+      const url=URL.createObjectURL(file);
+      img.onload=()=>{
+        const canvas=document.createElement('canvas');
+        const size=200; canvas.width=size; canvas.height=size;
+        const ctx=canvas.getContext('2d');
+        const min=Math.min(img.width,img.height);
+        const sx=(img.width-min)/2; const sy=(img.height-min)/2;
+        ctx.drawImage(img,sx,sy,min,min,0,0,size,size);
+        URL.revokeObjectURL(url);
+        res(canvas.toDataURL('image/jpeg',0.7));
+      };
+      img.src=url;
+    });
+    try{
+      const base64=await compress(f);
+      setAvatar(base64);
+      if(window.FB&&user.uid){
+        await window.FB.updateDoc(window.FB.doc(window.FB.db,'users',user.uid),{avatar:base64});
+        if(typeof onUpdateUser==='function') onUpdateUser({...user,avatar:base64});
+      }
+    }catch(err){console.log('avatar error:',err);}
+  };
+
+  const saveProfile=async()=>{
+    const updated={...user,name,bio,link,avatar};
+    if(window.FB&&user.uid){
+      try{await window.FB.updateDoc(window.FB.doc(window.FB.db,'users',user.uid),{name,bio,link,avatar});}catch(e){}
+    }
+    if(typeof onUpdateUser==='function') onUpdateUser(updated);
+    setEditing(false);
+  };
+
+  // 버블 전송 (AskModal에서 호출)
+  const handleAsk=async(text,targetUser)=>{
+    const bubble={
+      creatorHandle:targetUser?.handle||user.handle,
+      creatorUid:targetUser?.uid||user.uid,
+      creator:{name:targetUser?.name||user.name,handle:targetUser?.handle||user.handle,avatar:targetUser?.avatar||user.avatar},
+      question:text,
+      askerName:'익명',
+      askerUid:user.uid||'',
+      answers:[],
+      publicAnswer:null,
+      createdAt:window.FB?window.FB.serverTimestamp():Date.now(),
+      expiresAt:Date.now()+86400000,
+    };
+    if(window.FB){
+      try{await window.FB.addDoc(window.FB.collection(window.FB.db,'bubbles'),bubble);}
+      catch(e){console.log('bubble send error:',e);}
+    }
+    setAskModal(false);
+  };
+
+  // 버블 답변
+  const handleReply=async(bid,type,text)=>{
+    const bub=bubbles.find(b=>b.id===bid);
+    const update=type==='public'
+      ?{publicAnswer:{id:'pa'+Date.now(),type:'public',text,createdAt:Date.now()}}
+      :{answers:[...(bub?.answers||[]),{id:'a'+Date.now(),type:'private',to:user.id,text,createdAt:Date.now()}]};
+    if(window.FB){
+      try{await window.FB.updateDoc(window.FB.doc(window.FB.db,'bubbles',bid),update);}
+      catch(e){console.log('reply error:',e);}
+    }
+    setReplyModal(null);
+  };
+
+  const unread=bubbles.filter(b=>!b.publicAnswer&&(!b.answers||!b.answers.some(a=>a.to===user.id))).length;
+
+  return(
+    <div style={{flex:1,display:'flex',flexDirection:'column',overflow:'hidden'}}>
+      <div className="sc" style={{flex:1}}>
+        {/* 헤더 */}
+        <div style={{padding:'20px 18px 0',display:'flex',justifyContent:'space-between',alignItems:'flex-start'}}>
+          <div style={{display:'flex',gap:14,alignItems:'center'}}>
+            <div style={{position:'relative',cursor:editing?'pointer':'default'}} onClick={()=>editing&&avatarRef.current?.click()}>
+              <div style={{position:'relative',width:52,height:52}}>
+                <img src={avatar} style={{position:'relative',width:52,height:52,borderRadius:99,objectFit:'cover',border:'1.5px solid rgba(168,85,247,.35)'}} alt=""/>
+                {editing&&<div style={{position:'absolute',inset:0,borderRadius:99,background:'rgba(0,0,0,.4)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:16}}>✏️</div>}
+              </div>
+            </div>
+            <div>
+              {editing?<input className="inp" value={name} onChange={e=>setName(e.target.value)} style={{fontSize:14,fontWeight:700,padding:'4px 8px',marginBottom:4,width:140}}/>
+                :<div style={{fontSize:15,fontWeight:700}}>{name}</div>}
+              <div style={{fontSize:10,color:'var(--dim)'}}>{user.handle}</div>
+            </div>
+          </div>
+          <div style={{display:'flex',gap:8,alignItems:'center'}}>
+            {unread>0&&<button onClick={()=>setInboxOpen(true)} className="btn" style={{position:'relative',fontSize:18}}>
+              💬<span style={{position:'absolute',top:-4,right:-4,background:'#ec4899',borderRadius:99,fontSize:8,minWidth:14,height:14,display:'flex',alignItems:'center',justifyContent:'center',fontWeight:700}}>{unread}</span>
+            </button>}
+            {!unread&&<button onClick={()=>setInboxOpen(true)} className="btn" style={{fontSize:18}}>💬</button>}
+            {editing
+              ?<button onClick={saveProfile} className="gbtn" style={{fontSize:11,padding:'6px 14px',borderRadius:99}}>저장</button>
+              :<button onClick={()=>setEditing(true)} className="btn" style={{fontSize:11,color:'var(--dim)',border:'1px solid rgba(168,85,247,.2)',padding:'6px 12px',borderRadius:99}}>편집</button>}
+          </div>
+        </div>
+        <input ref={avatarRef} type="file" accept="image/*" style={{display:'none'}} onChange={onAvatarFile}/>
+
+        {/* 바이오 */}
+        <div style={{padding:'12px 18px 0'}}>
+          {editing?<textarea className="inp" value={bio} onChange={e=>setBio(e.target.value)} placeholder="소개" style={{width:'100%',minHeight:48,fontSize:11,resize:'none'}}/>
+            :<div style={{fontSize:11,color:'rgba(255,255,255,.55)',lineHeight:1.6}}>{bio}</div>}
+          {editing&&<input className="inp" value={link} onChange={e=>setLink(e.target.value)} placeholder="링크" style={{marginTop:6,fontSize:11}}/>}
+        </div>
+
+        {/* 받은 질문 버블 목록 */}
+        {bubbles.length>0&&(
+          <div style={{padding:'16px 18px 0'}}>
+            <div style={{fontSize:10,fontWeight:700,color:'var(--dim)',letterSpacing:'.08em',marginBottom:10}}>받은 질문</div>
+            <div style={{display:'flex',flexDirection:'column',gap:8}}>
+              {bubbles.map(b=>{
+                const isAnswered=b.publicAnswer||(b.answers&&b.answers.length>0);
+                return(
+                  <div key={b.id} style={{borderRadius:14,background:'rgba(168,85,247,.07)',border:`1px solid ${isAnswered?'rgba(168,85,247,.15)':'rgba(168,85,247,.3)'}`,padding:'12px 14px'}}>
+                    {/* 공개/비공개 태그 */}
+                    <div style={{display:'flex',gap:6,marginBottom:6,alignItems:'center'}}>
+                      {!isAnswered&&<span style={{fontSize:8,background:'rgba(236,72,153,.15)',borderRadius:99,padding:'2px 7px',color:'#ec4899'}}>미답변</span>}
+                    </div>
+                    {/* 질문 */}
+                    <div style={{fontSize:11,color:'rgba(255,255,255,.5)',marginBottom:4}}>Q. {b.question}</div>
+                    {/* 답변 */}
+                    {b.publicAnswer&&<div style={{fontSize:12,color:'rgba(255,255,255,.85)',lineHeight:1.5,marginTop:6,paddingTop:6,borderTop:'1px solid rgba(168,85,247,.1)'}}>A. {b.publicAnswer.text}</div>}
+                    {!b.publicAnswer&&b.answers&&b.answers.map(a=>(
+                      <div key={a.id} style={{fontSize:12,color:'rgba(255,255,255,.85)',lineHeight:1.5,marginTop:6,paddingTop:6,borderTop:'1px solid rgba(80,80,80,.2)'}}>A. {a.text}</div>
+                    ))}
+                    {/* 답변 버튼 */}
+                    {!isAnswered&&(
+                      <div style={{display:'flex',gap:6,marginTop:8}}>
+                        <button onClick={()=>setReplyModal({bubble:b,type:'private'})} className="btn" style={{flex:1,fontSize:9,padding:'6px',borderRadius:8,border:'1px solid rgba(168,85,247,.2)',background:'rgba(168,85,247,.05)'}}>비공개 답변</button>
+                        <button onClick={()=>setReplyModal({bubble:b,type:'public'})} className="btn" style={{flex:1,fontSize:9,padding:'6px',borderRadius:8,border:'1px solid rgba(168,85,247,.3)',background:'rgba(168,85,247,.1)'}}>공개 답변</button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* 내 릴레이 */}
+        {mine.length>0&&(
+          <div style={{padding:'16px 18px 0'}}>
+            <div style={{fontSize:10,fontWeight:700,color:'var(--dim)',letterSpacing:'.08em',marginBottom:10}}>MY RELAY</div>
+            <div style={{display:'flex',flexDirection:'column',gap:8}}>
+              {mine.map(s=>(
+                <div key={s.id} style={{display:'flex',gap:10,alignItems:'center',cursor:'pointer',padding:'8px 10px',borderRadius:12,background:'rgba(168,85,247,.05)'}} onClick={()=>onOpen(s)}>
+                  <img src={s.participants?.[0]?.photo||s.photo} style={{width:40,height:40,borderRadius:8,objectFit:'cover',flexShrink:0}} alt=""/>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:12,fontWeight:600,marginBottom:2,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{s.title}</div>
+                    <div style={{fontSize:9,color:'var(--dim)'}}>{s.countries}개국 · {(s.totalKm/1000).toFixed(1)}K km</div>
+                  </div>
+                  {onDelete&&<button onClick={e=>{e.stopPropagation();if(confirm('삭제할까요?'))onDelete(s.id);}} className="btn" style={{fontSize:16,color:'rgba(255,80,80,.4)',flexShrink:0}}>×</button>}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* 참여한 릴레이 */}
+        {joined.length>0&&(
+          <div style={{padding:'16px 18px 0'}}>
+            <div style={{fontSize:10,fontWeight:700,color:'var(--dim)',letterSpacing:'.08em',marginBottom:10}}>JOINED RELAY</div>
+            <div style={{display:'flex',flexDirection:'column',gap:8}}>
+              {joined.map(s=>(
+                <div key={s.id} style={{display:'flex',gap:10,alignItems:'center',cursor:'pointer',padding:'8px 10px',borderRadius:12,background:'rgba(168,85,247,.05)'}} onClick={()=>onOpen(s)}>
+                  <img src={s.participants?.[0]?.photo||s.photo} style={{width:40,height:40,borderRadius:8,objectFit:'cover',flexShrink:0}} alt=""/>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:12,fontWeight:600,marginBottom:2,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{s.title}</div>
+                    <div style={{fontSize:9,color:'var(--dim)'}}>{s.countries}개국 · {(s.totalKm/1000).toFixed(1)}K km</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* 로그아웃 */}
+        <div style={{padding:'24px 18px 40px'}}>
+          <button onClick={onLogout} className="btn" style={{fontSize:11,color:'rgba(255,80,80,.4)'}}>로그아웃</button>
+        </div>
+      </div>
+
+      {inboxOpen&&<InboxModal bubbles={bubbles} user={user} onClose={()=>setInboxOpen(false)} onReply={(b,type)=>setReplyModal({bubble:b,type})}/>}
+      {replyModal&&<ReplyModal bubble={replyModal.bubble} replyType={replyModal.type} onClose={()=>setReplyModal(null)} onSend={handleReply}/>}
+      {askModal&&<AskModal creator={askModal.target||user} onClose={()=>setAskModal(null)} onSend={(text)=>handleAsk(text,askModal.target||user)}/>}
+    </div>
+  );
+};
+
+
 const JoinRelay=({seed,user,onClose,onPublish})=>{
   const {t}=useT();
   const isNew=!seed;
@@ -1233,7 +1331,6 @@ const JoinRelay=({seed,user,onClose,onPublish})=>{
   const [isVideoFile,setIsVideoFile]=useState(false);
   const [title,setTitle]=useState(seed?seed.title:'');
   const [desc,setDesc]=useState('');
-  const [cat,setCat]=useState(seed?seed.cat:'');
   const [locQuery,setLocQuery]=useState('');
   const [locResult,setLocResult]=useState(null);
   const [placeSuggestions,setPlaceSuggestions]=useState([]);
@@ -1242,17 +1339,17 @@ const JoinRelay=({seed,user,onClose,onPublish})=>{
   const [uploading,setUploading]=useState(false);
   const fileRef=useRef(null);
   const locDebounceRef=useRef(null);
-  const CATS=['Daily','Running','Drive','Workout','OOTD','Food','Cafe','Brunch','Travel','Nature','Weather','City','Music','Ocean','Light','Market','Family','Baby','Joy','Sadness','Hope','Courage','Cheer','Frustration','Art','Sports','Animals','Pets','Night','Movie','Culture'];
+
   const searchPlaces=async(q)=>{if(q.length<2){setPlaceSuggestions([]);return;}setPlaceSearching(true);try{const res=await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&limit=6`,{headers:{'Accept-Language':'ko,en'}});const data=await res.json();setPlaceSuggestions(data.map(p=>({name:p.display_name.split(',').slice(0,2).join(', '),mx:((parseFloat(p.lon)+180)/360),my:(1-(Math.log(Math.tan((parseFloat(p.lat)*Math.PI/180)/2+Math.PI/4))+Math.PI)/(2*Math.PI))})));}catch(e){setPlaceSuggestions([]);}setPlaceSearching(false);};
   const onLocInput=e=>{const v=e.target.value;setLocQuery(v);setLocResult(null);clearTimeout(locDebounceRef.current);locDebounceRef.current=setTimeout(()=>searchPlaces(v),400);};
   const onFile=e=>{const f=e.target.files[0];if(!f)return;setPreviewLoading(true);if(f.type.startsWith('video/')){const url=URL.createObjectURL(f);const v=document.createElement('video');v.src=url;v.onloadedmetadata=()=>{if(v.duration>60){alert('Max 60s');URL.revokeObjectURL(url);return;}setType(v.videoWidth>v.videoHeight?'landscape':'portrait');setIsVideoFile(true);setPreviewUrl(url);setPreviewLoading(false);setStep(2);};}else if(f.type.startsWith('image/')){const url=URL.createObjectURL(f);setIsVideoFile(false);setPreviewUrl(url);setPreviewLoading(false);setStep(2);}};
   const publish=()=>{
-    if(isNew&&(!title||!cat))return;
+    if(isNew&&!title)return;
     setUploading(true);
     const _start=Date.now();
     const _run=()=>{const p=Math.min((Date.now()-_start)/600*100,100);setPct(p);
       if(p<100){requestAnimationFrame(_run);}else{
-        if(isNew){onPublish({id:'s'+Date.now(),uid:user.id,name:user.name,handle:user.handle||'@user',avatar:user.avatar,cat,title,thumb:previewUrl||'https://images.unsplash.com/photo-1501854140801-50d01698950b?w=800',totalKm:0,honors:0,countries:1,type,isVideo:isVideoFile,comments:[],participants:[{id:'p1',name:user.name,handle:user.handle||'@user',avatar:user.avatar,city:(locResult?locResult.name:'Seoul'),loc:(locResult||LOC.seoul),km:0,photo:previewUrl||'https://images.unsplash.com/photo-1501854140801-50d01698950b?w=800',isVideo:isVideoFile,desc}]});}
+        if(isNew){onPublish({id:'s'+Date.now(),uid:user.id,name:user.name,handle:user.handle||'@user',avatar:user.avatar,cat:'',title,thumb:previewUrl||'https://images.unsplash.com/photo-1501854140801-50d01698950b?w=800',totalKm:0,honors:0,countries:1,type,isVideo:isVideoFile,comments:[],participants:[{id:'p1',name:user.name,handle:user.handle||'@user',avatar:user.avatar,city:(locResult?locResult.name:'Seoul'),loc:(locResult||LOC.seoul),km:0,photo:previewUrl||'https://images.unsplash.com/photo-1501854140801-50d01698950b?w=800',isVideo:isVideoFile,desc}]});}
         else{onPublish(seed.id,{id:'p'+Date.now(),name:user.name,handle:user.handle||'@user',avatar:user.avatar,city:(locResult?locResult.name:'Seoul'),loc:(locResult||LOC.seoul),km:Math.floor(Math.random()*15000+500),photo:previewUrl||seed.thumb,isVideo:isVideoFile,desc});}
         setStep(3);}};
     requestAnimationFrame(_run);};
@@ -1282,8 +1379,15 @@ const JoinRelay=({seed,user,onClose,onPublish})=>{
           <div style={{width:44,height:44,borderRadius:99,border:'3px solid rgba(168,85,247,.25)',borderTopColor:'#a855f7',animation:'spin 1s linear infinite'}}/>
           <div style={{fontSize:11,color:'var(--dim)'}}>파일 불러오는 중…</div>
         </div>:<>
-          <div style={{fontSize:10,color:'var(--dim)',lineHeight:1.6}}>{t.uploadDesc}</div>
-          <button onClick={()=>fileRef.current?.click()} className="gbtn" style={{padding:'14px 24px',borderRadius:12,fontSize:13,alignSelf:'flex-start'}}>{t.selectVideo}</button>
+          <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:16,padding:'20px 0',cursor:'pointer'}} onClick={()=>fileRef.current?.click()}>
+            <div style={{width:80,height:80,borderRadius:99,border:'2px dashed rgba(168,85,247,.4)',display:'flex',alignItems:'center',justifyContent:'center',background:'rgba(168,85,247,.06)'}}>
+              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="rgba(168,85,247,.7)" strokeWidth="1.5"><rect x="2" y="3" width="20" height="18" rx="2"/><path d="M16 8l4-4v16l-4-4"/><circle cx="9" cy="12" r="3"/></svg>
+            </div>
+            <div style={{textAlign:'center'}}>
+              <div style={{fontSize:13,fontWeight:600,marginBottom:4}}>{t.selectVideo}</div>
+              <div style={{fontSize:10,color:'var(--dim)',lineHeight:1.6}}>{t.uploadDesc}</div>
+            </div>
+          </div>
         </>}
       </div>}
       {step===2&&(<>
@@ -1309,7 +1413,7 @@ const JoinRelay=({seed,user,onClose,onPublish})=>{
                   </div>
                 )}
               </div>
-              <div style={{marginTop:14}}><div style={{fontSize:9,color:'var(--dim)',marginBottom:10,letterSpacing:'.07em'}}>{t.category.toUpperCase()}</div><div style={{display:'flex',flexWrap:'wrap',gap:12}}>{CATS.map(c=><button key={c} onClick={()=>setCat(c)} className="btn" style={{fontSize:11,fontWeight:cat===c?700:400,color:cat===c?'var(--p)':'var(--dim)',borderBottom:cat===c?'1px solid var(--p)':'1px solid transparent',paddingBottom:2}}>{c}</button>)}</div></div>
+              
             </div>
           )}
         </div>
@@ -1527,6 +1631,29 @@ const App=()=>{
     }
   };
 
+  // 버블 전송 (전역)
+  const handleSendBubble=async(text,targetUser)=>{
+    if(!targetUser||!text.trim())return;
+    const bubble={
+      creatorHandle:targetUser.handle,
+      creatorUid:targetUser.uid||targetUser.id||'',
+      creator:{name:targetUser.name,handle:targetUser.handle,avatar:targetUser.avatar},
+      question:text,
+      askerName:'익명',
+      askerUid:user?.uid||'',
+      answers:[],
+      publicAnswer:null,
+      createdAt:window.FB?window.FB.serverTimestamp():Date.now(),
+      expiresAt:Date.now()+86400000,
+    };
+    if(window.FB){
+      try{
+        await window.FB.addDoc(window.FB.collection(window.FB.db,'bubbles'),bubble);
+      }catch(e){console.log('bubble error:',e);}
+    }
+    setAskTarget(null);
+  };
+
   // 체류 시간 추적
   const pageEnterRef=useRef(null);
   const openDetail=(seed)=>{
@@ -1560,13 +1687,14 @@ const App=()=>{
     <>
       {!user&&<Login onLogin={handleLogin}/>}
       {user&&joinModal!==null&&<JoinRelay seed={joinModal||null} user={user} onClose={()=>setJoinModal(null)} onPublish={handlePublish}/>}
-      {user&&joinModal===null&&detail&&<SeedDetail seed={detail} onBack={closeDetail} currentUser={user} onDelete={handleDelete}/>}
+      {user&&joinModal===null&&detail&&<SeedDetail seed={detail} onBack={closeDetail} currentUser={user} onDelete={handleDelete} onAsk={u=>setAskTarget(u)}/>}
       {user&&joinModal===null&&!detail&&(<>
         {tab==='home'&&<HomeFeed seeds={seeds} onDetail={openDetail} onNotif={()=>setNotif(true)} unread={unread} onJoin={s=>setJoinModal(s)} currentUser={user} onAsk={setAskTarget}/>}
         {tab==='explore'&&<Explore seeds={seeds} onOpen={openDetail} onJoin={s=>setJoinModal(s)} currentUser={user}/>}
-        {tab==='legacy'&&<Legacy user={user} seeds={seeds} onOpen={openDetail}/>}
+        {tab==='legacy'&&<Legacy user={user} seeds={seeds} onOpen={openDetail} onAsk={u=>setAskTarget(u)}/>}
         {tab==='profile'&&<Profile user={user} seeds={seeds} onLogout={handleLogout} onOpen={openDetail} onDelete={handleDelete} onUpdateUser={u=>{setUser(u);if(window.FB)window.FB.updateDoc(window.FB.doc(window.FB.db,'users',u.uid),{avatar:u.avatar}).catch(()=>{});}}/>}
         {notif&&<Notifs onClose={()=>setNotif(false)}/>}
+        {askTarget&&<AskModal creator={askTarget} onClose={()=>setAskTarget(null)} onSend={(text)=>handleSendBubble(text,askTarget)}/>}
         {askTarget&&<AskModal creator={askTarget} onClose={()=>setAskTarget(null)} onSend={(msg)=>{alert('버블을 보냈어요! 💬');setAskTarget(null);}}/>}
         <div className="tabbar">
           {TABS.map(({key,label})=>(
